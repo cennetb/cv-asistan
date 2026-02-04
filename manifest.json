@@ -1,0 +1,19 @@
+{
+  "manifest_version": 3,
+  "name": "AI CV Auto-Filler",
+  "version": "2.0.1",
+  "description": "CV + kullanıcı tercihleriyle (opsiyonel AI) iş başvuru formlarını otomatik doldurur.",
+  "action": {
+    "default_popup": "popup.html"
+  },
+  "permissions": ["storage", "activeTab", "scripting", "webNavigation"],
+  "host_permissions": ["<all_urls>"],
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "run_at": "document_idle",
+      "all_frames": true
+    }
+  ]
+}

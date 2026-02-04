@@ -1,0 +1,457 @@
+<!doctype html>
+<html lang="tr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      :root {
+        --bg: #f6f7fb;
+        --card: #fff;
+        --text: #1f2937;
+        --muted: #6b7280;
+        --pri: #2563eb;
+        --ok: #16a34a;
+        --warn: #d97706;
+        --border: #e5e7eb;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        width: 360px;
+        margin: 0;
+        padding: 12px;
+        font-family:
+          ui-sans-serif,
+          system-ui,
+          -apple-system,
+          Segoe UI,
+          Roboto,
+          Arial;
+        background: var(--bg);
+        color: var(--text);
+      }
+      .card {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06);
+        overflow: hidden;
+      }
+      header {
+        padding: 14px 14px 10px;
+        border-bottom: 1px solid var(--border);
+      }
+      h1 {
+        font-size: 16px;
+        margin: 0;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      h1 span {
+        font-size: 18px;
+      }
+      .sub {
+        margin: 6px 0 0;
+        font-size: 12px;
+        color: var(--muted);
+        line-height: 1.35;
+      }
+      nav {
+        display: flex;
+        gap: 6px;
+        padding: 10px 10px 0;
+        flex-wrap: wrap;
+      }
+      .tab {
+        flex: 1;
+        min-width: 78px;
+        padding: 8px 10px;
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        background: #fff;
+        color: var(--text);
+        font-size: 12px;
+        cursor: pointer;
+      }
+      .tab.active {
+        border-color: rgba(37, 99, 235, 0.35);
+        background: rgba(37, 99, 235, 0.08);
+        color: #1d4ed8;
+        font-weight: 600;
+      }
+      main {
+        padding: 12px 14px 14px;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+      .row {
+        display: flex;
+        gap: 10px;
+      }
+      .row > * {
+        flex: 1;
+      }
+      label {
+        font-size: 12px;
+        color: var(--muted);
+        display: block;
+        margin: 0 0 6px;
+      }
+      input[type="text"],
+      input[type="password"],
+      input[type="number"],
+      textarea,
+      select {
+        width: 100%;
+        padding: 10px;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        background: #fff;
+        color: var(--text);
+        outline: none;
+      }
+      textarea {
+        min-height: 90px;
+        resize: vertical;
+      }
+      .btn {
+        width: 100%;
+        padding: 11px 12px;
+        border: none;
+        border-radius: 10px;
+        cursor: pointer;
+        font-weight: 700;
+        font-size: 13px;
+        color: white;
+        background: var(--pri);
+      }
+      .btn.secondary {
+        background: #111827;
+      }
+      .btn.ok {
+        background: var(--ok);
+      }
+      .btn.warn {
+        background: var(--warn);
+      }
+      .btn:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+      }
+      .mini {
+        font-size: 11px;
+        color: var(--muted);
+        line-height: 1.35;
+      }
+      .pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 6px 10px;
+        border-radius: 999px;
+        border: 1px solid var(--border);
+        font-size: 11px;
+        color: var(--muted);
+        background: #fff;
+      }
+      .pill b {
+        color: var(--text);
+      }
+      .drop {
+        border: 2px dashed #cbd5e1;
+        background: #fbfdff;
+        border-radius: 12px;
+        padding: 14px;
+        text-align: center;
+        cursor: pointer;
+      }
+      .drop:hover {
+        border-color: rgba(37, 99, 235, 0.5);
+        background: rgba(37, 99, 235, 0.04);
+      }
+      .hr {
+        height: 1px;
+        background: var(--border);
+        margin: 2px 0;
+      }
+      .toggle {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        padding: 10px;
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        background: #fff;
+      }
+      .toggle small {
+        color: var(--muted);
+        display: block;
+        line-height: 1.2;
+      }
+      .switch {
+        width: 44px;
+        height: 26px;
+        border-radius: 999px;
+        background: #e5e7eb;
+        position: relative;
+        cursor: pointer;
+        flex: 0 0 auto;
+      }
+      .switch::after {
+        content: "";
+        width: 20px;
+        height: 20px;
+        border-radius: 999px;
+        background: #fff;
+        position: absolute;
+        top: 3px;
+        left: 3px;
+        transition: 0.18s;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
+      }
+      .switch.on {
+        background: rgba(22, 163, 74, 0.35);
+      }
+      .switch.on::after {
+        left: 21px;
+      }
+      .hidden {
+        display: none !important;
+      }
+      .status {
+        font-size: 12px;
+        padding: 10px;
+        border-radius: 12px;
+        border: 1px solid var(--border);
+        background: #fff;
+      }
+      .status.ok {
+        border-color: rgba(22, 163, 74, 0.35);
+        background: rgba(22, 163, 74, 0.06);
+      }
+      .status.bad {
+        border-color: rgba(217, 119, 6, 0.35);
+        background: rgba(217, 119, 6, 0.06);
+      }
+      .status .k {
+        color: var(--muted);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <header>
+        <h1><span>🤖</span> AI CV Asistanı</h1>
+        <p class="sub">
+          Bir kez kur: CV + beklentiler + önyazı. Sonra her başvuruda tek tuşla
+          doldur.
+        </p>
+      </header>
+
+      <nav>
+        <button class="tab active" data-tab="setup">Kurulum</button>
+        <button class="tab" data-tab="profile">Profil</button>
+        <button class="tab" data-tab="extras">Beklentiler</button>
+        <button class="tab" data-tab="texts">Metinler</button>
+        <button class="tab" data-tab="fill">Doldur</button>
+      </nav>
+
+      <main>
+        <!-- SETUP -->
+        <section id="tab-setup">
+          <div class="toggle">
+            <div>
+              <b>AI kullan (Gemini)</b>
+              <small
+                >Opsiyonel. Kapalıysa manuel/regex çıkarım + kaydedilmiş
+                metinler.</small
+              >
+            </div>
+            <div
+              id="ai-switch"
+              class="switch"
+              role="switch"
+              aria-checked="false"
+            ></div>
+          </div>
+
+          <div id="api-area" class="hidden">
+            <label>Gemini API Anahtarı</label>
+            <input type="password" id="apiKey" placeholder="AIza..." />
+            <button id="saveApi" class="btn secondary" style="margin-top: 8px">
+              Anahtarı Kaydet
+            </button>
+            <p class="mini" style="margin: 8px 0 0">
+              Anahtar sadece tarayıcında saklanır (chrome.storage). İstersen
+              AI’yi kapat.
+            </p>
+          </div>
+
+          <div class="hr"></div>
+
+          <div id="cv-drop" class="drop">
+            <div style="font-size: 20px">📄</div>
+            <div style="font-weight: 700; margin-top: 4px">CV Yükle (PDF)</div>
+            <div class="mini" id="cv-name" style="margin-top: 6px">
+              Henüz dosya yok
+            </div>
+            <input id="cvFile" type="file" accept=".pdf" class="hidden" />
+          </div>
+
+          <button id="analyzeCv" class="btn" disabled>
+            🧠 CV’den Profil Çıkar
+          </button>
+
+          <div id="setupStatus" class="status hidden"></div>
+        </section>
+
+        <!-- PROFILE -->
+        <section id="tab-profile" class="hidden">
+          <div class="row">
+            <div>
+              <label>Ad</label>
+              <input type="text" id="firstName" placeholder="Örn: Ceno" />
+            </div>
+            <div>
+              <label>Soyad</label>
+              <input type="text" id="lastName" placeholder="Örn: Yılmaz" />
+            </div>
+          </div>
+
+          <label>E-posta</label>
+          <input type="text" id="email" placeholder="name@mail.com" />
+
+          <label>Telefon</label>
+          <input type="text" id="phone" placeholder="+90..." />
+
+          <label>LinkedIn</label>
+          <input type="text" id="linkedin" placeholder="linkedin.com/in/..." />
+
+          <label>Web / Portföy</label>
+          <input type="text" id="website" placeholder="https://..." />
+
+          <label>Kısa Özet (CV/Profil)</label>
+          <textarea id="summary" placeholder="2-4 cümle..."></textarea>
+
+          <label>Yetenekler (virgülle)</label>
+          <textarea
+            id="skills"
+            placeholder="JavaScript, React, SQL ..."
+          ></textarea>
+
+          <button id="saveProfile" class="btn ok">✅ Profili Kaydet</button>
+          <p class="mini">
+            Not: CV’den çıkanları burada düzeltmen en doğru sonuç verir.
+          </p>
+        </section>
+
+        <!-- EXTRAS -->
+        <section id="tab-extras" class="hidden">
+          <label>Lokasyon (şehir/ülke)</label>
+          <input type="text" id="location" placeholder="İstanbul, TR" />
+
+          <div class="row">
+            <div>
+              <label>Beklenen Maaş</label>
+              <input type="text" id="expectedSalary" placeholder="Örn: 90000" />
+            </div>
+            <div>
+              <label>Para Birimi</label>
+              <select id="salaryCurrency">
+                <option value="">Seç</option>
+                <option value="TRY">TRY</option>
+                <option value="USD">USD</option>
+                <option value="EUR">EUR</option>
+                <option value="GBP">GBP</option>
+              </select>
+            </div>
+          </div>
+
+          <label>Çalışma Modeli</label>
+          <select id="workModel">
+            <option value="">Seç</option>
+            <option value="On-site">Ofis</option>
+            <option value="Hybrid">Hibrit</option>
+            <option value="Remote">Remote</option>
+          </select>
+
+          <button id="saveExtras" class="btn ok">✅ Beklentileri Kaydet</button>
+          <p class="mini">
+            Maaş alanı her sitede farklı olabilir; dolduramadığında
+            önizleme/manuel kontrol önerilir.
+          </p>
+        </section>
+
+        <!-- TEXTS -->
+        <section id="tab-texts" class="hidden">
+          <label>Hedef Pozisyon (opsiyonel)</label>
+          <input
+            type="text"
+            id="targetRole"
+            placeholder="Örn: Frontend Developer"
+          />
+
+          <label>İlan Metni (opsiyonel, kopyala-yapıştır)</label>
+          <textarea
+            id="jobDesc"
+            placeholder="İlan açıklamasını buraya yapıştırırsan önyazı daha iyi olur."
+          ></textarea>
+
+          <div class="row">
+            <button id="genCover" class="btn">🪄 Önyazı Üret (AI)</button>
+            <button id="clearJob" class="btn secondary">Temizle</button>
+          </div>
+
+          <label>Önyazı</label>
+          <textarea
+            id="coverLetter"
+            placeholder="Önyazın burada saklanır, formda ilgili alana basılır."
+          ></textarea>
+
+          <button id="saveTexts" class="btn ok">✅ Metinleri Kaydet</button>
+          <p class="mini">
+            AI kapalıysa da önyazıyı manuel yazıp kaydedebilirsin.
+          </p>
+        </section>
+
+        <!-- FILL -->
+        <section id="tab-fill" class="hidden">
+          <div class="status" id="readyBox">
+            <div><b>Hazır mıyız?</b></div>
+            <div class="mini" style="margin-top: 6px">
+              Aktif sekmede başvuru formu açıkken aşağıdaki butona bas.
+            </div>
+            <div
+              style="margin-top: 10px; display: flex; gap: 8px; flex-wrap: wrap"
+            >
+              <span class="pill"
+                ><span class="k">Profil:</span> <b id="pillProfile">—</b></span
+              >
+              <span class="pill"
+                ><span class="k">Maaş:</span> <b id="pillSalary">—</b></span
+              >
+              <span class="pill"
+                ><span class="k">Önyazı:</span> <b id="pillCover">—</b></span
+              >
+            </div>
+          </div>
+
+          <button id="fillNow" class="btn ok">✍️ Bu Sayfayı Doldur</button>
+
+          <div id="fillStatus" class="status hidden"></div>
+          <p class="mini">
+            Eklenti “gönder” tuşuna basmaz. Doldurduktan sonra kontrol edip sen
+            gönderirsin.
+          </p>
+        </section>
+      </main>
+    </div>
+
+    <script src="pdf.min.js"></script>
+    <script src="popup.js"></script>
+  </body>
+</html>

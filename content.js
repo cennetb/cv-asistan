@@ -1,367 +1,450 @@
-// content.js - Robust Autofill + Strict Name Lock Fix
 (() => {
-  chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
-    try {
-      if (!request || !request.action) return;
+  "use strict";
 
-      if (request.action === "PING") {
-        sendResponse({
-          pong: true,
-          href: location.href,
-          frame: window.top === window ? "top" : "iframe",
-        });
-        return true;
-      }
+  const U = window.CVAUtils;
 
-      if (request.action === "FILL_FORM") {
-        const data = request.data || {};
-        console.log("Gelen Veri:", data); // Hata ayıklama için
-        const profile = buildProfile(data);
-        const result = fillInputs(profile);
-        sendResponse({ ok: true, result });
-        return true;
-      }
-    } catch (e) {
-      console.error("Content Script Hatası:", e);
-      sendResponse({ ok: false, error: String(e) });
-      return true;
-    }
-  });
+  const STATE = {
+    debug: false,
+    nameLock: {
+      enabled: true,
+      mode: "IF_EMPTY", 
+      protectWithObserver: true,
+    },
+    fillPolicy: {
+      skipIfNotEmpty: true,
+      dryRun: false,
+    },
+    locked: {
+      entries: new Map(),
+      observer: null,
+    },
+  };
 
-  // -------------------------
-  // Build normalized profile
-  // -------------------------
-  function buildProfile(rawData) {
-    const data = rawData && typeof rawData === "object" ? rawData : {};
+  function log(...args) {
+    if (STATE.debug) console.log("[CV Asistan]", ...args);
+  }
 
-    // Basit düzleştirme (Flattening) - Eğer veri iç içe ise
-    const flatData = { ...data, ...(data.extras || {}), ...(data.texts || {}) };
+  function warn(...args) {
+    console.warn("[CV Asistan]", ...args);
+  }
 
-    const firstName = pick(flatData, [
-      "firstName",
-      "first_name",
-      "givenName",
-      "ad",
-      "isim",
-    ]);
-    const lastName = pick(flatData, [
-      "lastName",
-      "last_name",
-      "surname",
-      "soyad",
-    ]);
+  function error(...args) {
+    console.error("[CV Asistan]", ...args);
+  }
 
-    // Tam isim oluşturma
-    let fullName = pick(flatData, ["fullName", "full_name", "name", "adsoyad"]);
-    if (!fullName && firstName && lastName) {
-      fullName = `${firstName} ${lastName}`.trim();
-    } else if (fullName && !firstName) {
-      // Eğer sadece fullName varsa, bölmeye çalış (Basitçe)
-      const parts = fullName.split(" ");
-      if (parts.length > 1) {
-        // firstName = parts[0]; // (Opsiyonel, şimdilik gerek yok)
-      }
-    }
-
-    let email = pick(flatData, ["email", "e-mail", "mail", "eposta"]);
-    let phone = pick(flatData, ["phone", "mobile", "tel", "telefon", "cep"]);
-    let linkedin = pick(flatData, ["linkedin", "linkedinUrl", "url"]);
-    let location = pick(flatData, [
-      "location",
-      "city",
-      "address",
-      "konum",
-      "şehir",
-    ]);
-    let company = pick(flatData, [
-      "company",
-      "currentCompany",
-      "employer",
-      "şirket",
-      "firma",
-    ]);
-    let summary = pick(flatData, [
-      "summary",
-      "about",
-      "bio",
-      "coverLetter",
-      "ön yazı",
-    ]);
-    let gradDate = pick(flatData, ["gradDate", "graduationDate", "mezuniyet"]);
-
-    // Temizlik ve Güvenlik (Normalization)
-    email = normalizeEmail(email);
-    phone = normalizePhone(phone);
-    linkedin = normalizeUrl(linkedin);
-
-    // İsim sızıntısı kontrolü (Eğer Company == İsim ise temizle)
-    if (looksLikeOnlyName(company, fullName)) company = "";
-    if (looksLikeOnlyName(location, fullName)) location = "";
-
+  function getFrameInfo() {
     return {
-      fullName,
-      firstName,
-      lastName,
-      email,
-      phone,
-      linkedin,
-      location,
-      company,
-      summary,
-      gradDate,
+      href: location.href,
+      frame: window.top === window ? "top" : "iframe",
     };
   }
 
-  function pick(obj, keys) {
-    if (!obj) return "";
-    for (const k of keys) {
-      const v = getInsensitive(obj, k);
-      if (v) return String(v).trim();
-    }
-    return "";
+  function setDebug(v) {
+    STATE.debug = !!v;
   }
 
-  function getInsensitive(obj, key) {
-    const low = key.toLowerCase();
-    for (const k of Object.keys(obj)) {
-      if (k.toLowerCase() === low) return obj[k];
+  function applySettings(settings = {}) {
+    try {
+      if (typeof settings.debug === "boolean") STATE.debug = settings.debug;
+
+      if (settings.nameLock) {
+        STATE.nameLock.enabled = !!settings.nameLock.enabled;
+        STATE.nameLock.mode = settings.nameLock.mode || STATE.nameLock.mode;
+        STATE.nameLock.protectWithObserver =
+          settings.nameLock.mode === "PROTECT";
+      }
+      if (settings.fillPolicy) {
+        STATE.fillPolicy.skipIfNotEmpty =
+          settings.fillPolicy.skipIfNotEmpty !== false;
+        STATE.fillPolicy.dryRun = !!settings.fillPolicy.dryRun;
+      }
+    } catch (e) {
+      warn("applySettings error:", e);
     }
-    return undefined;
   }
 
-  // -------------------------
-  // Main Fill Logic
-  // -------------------------
-  function fillInputs(p) {
-    // Sayfadaki görünür inputları al
-    const inputs = Array.from(
-      document.querySelectorAll("input, textarea, select"),
-    ).filter(isFillable);
+  function shouldNeverFillElement(el) {
+    try {
+      const tag = (el.tagName || "").toLowerCase();
+      if (tag === "input") {
+        const type = (el.getAttribute("type") || "text").toLowerCase();
+        if (type === "password") return true;
+      }
+      const name = (
+        (el.getAttribute("name") || "") +
+        " " +
+        (el.getAttribute("id") || "")
+      ).toLowerCase();
+      if (/cc|credit|card|cvv|cvc|iban|swift|pass(word)?/i.test(name))
+        return true;
+      return false;
+    } catch {
+      return false;
+    }
+  }
 
-    let filledCount = 0;
-    const filled = [];
+  function isNameFieldType(t) {
+    return t === "firstName" || t === "lastName" || t === "fullName";
+  }
 
-    for (const el of inputs) {
-      const meta = buildMeta(el); // Inputun "kimlik kartı"
-      const type = (el.type || "text").toLowerCase();
+  function enforceNameLockDecision(el, fieldType, profile, report) {
+    if (!STATE.nameLock.enabled) return { allowed: true, reason: "" };
+    if (!isNameFieldType(fieldType)) return { allowed: true, reason: "" };
 
-      // --- KATI EŞLEŞTİRME KURALLARI (Strict Matching) ---
+    const current = (el.value || "").trim();
+    const desired = (profile[fieldType] || "").trim();
 
-      // 1. EMAIL (Kesinlikle Email ise)
-      if (
-        type === "email" ||
-        (type === "text" && match(meta, ["email", "e-mail", "posta", "mail"]))
-      ) {
-        if (!match(meta, ["name", "isim", "adınız"])) {
-          // "Email Name" tuzağına düşme
-          if (setValue(el, p.email)) filledCount++;
+    if (STATE.nameLock.mode === "NEVER") {
+      return { allowed: false, reason: "name-lock: NEVER (skip)" };
+    }
+
+    if (STATE.nameLock.mode === "IF_EMPTY") {
+      if (current) {
+        return {
+          allowed: false,
+          reason: "name-lock: IF_EMPTY and already filled",
+        };
+      }
+      if (!desired) {
+        return { allowed: false, reason: "name-lock: no desired value" };
+      }
+      return { allowed: true, reason: "" };
+    }
+
+    if (STATE.nameLock.mode === "PROTECT") {
+      if (current && current !== desired) {
+        return {
+          allowed: false,
+          reason: "name-lock: PROTECT and value differs (refuse override)",
+        };
+      }
+      return { allowed: true, reason: "" };
+    }
+
+    return { allowed: true, reason: "" };
+  }
+
+  function ensureNameObserver() {
+    if (!STATE.nameLock.enabled) return;
+    if (STATE.nameLock.mode !== "PROTECT") return;
+
+    if (STATE.locked.observer) return;
+
+    const obs = new MutationObserver(() => {
+      try {
+        for (const [el, expected] of STATE.locked.entries) {
+          if (!el || !document.contains(el)) continue;
+          const cur = (el.value || "").trim();
+          if (cur !== expected) {
+            log("Name lock restore:", { cur, expected, el });
+            U.setNativeValue(el, expected);
+          }
+        }
+      } catch (e) {
+        warn("Name observer error:", e);
+      }
+    });
+
+    obs.observe(document.documentElement || document.body, {
+      subtree: true,
+      childList: true,
+      characterData: true,
+      attributes: true,
+      attributeFilter: ["value"],
+    });
+
+    STATE.locked.observer = obs;
+  }
+
+  function addLockedEntry(el, expectedValue) {
+    try {
+      if (!el) return;
+      STATE.locked.entries.set(el, (expectedValue || "").trim());
+      ensureNameObserver();
+    } catch (e) {
+      warn("addLockedEntry error:", e);
+    }
+  }
+
+  function makeOverlay(text) {
+    try {
+      if (!STATE.debug) return;
+      const existing = document.getElementById("cva-debug-overlay");
+      if (existing) existing.remove();
+
+      const div = document.createElement("div");
+      div.id = "cva-debug-overlay";
+      div.style.position = "fixed";
+      div.style.right = "12px";
+      div.style.bottom = "12px";
+      div.style.zIndex = "2147483647";
+      div.style.maxWidth = "360px";
+      div.style.padding = "10px";
+      div.style.background = "rgba(0,0,0,0.75)";
+      div.style.color = "white";
+      div.style.fontSize = "12px";
+      div.style.borderRadius = "10px";
+      div.style.whiteSpace = "pre-wrap";
+      div.style.boxShadow = "0 6px 22px rgba(0,0,0,0.35)";
+      div.textContent = text;
+
+      const btn = document.createElement("button");
+      btn.textContent = "Kapat";
+      btn.style.marginTop = "8px";
+      btn.style.cursor = "pointer";
+      btn.onclick = () => div.remove();
+      div.appendChild(document.createElement("br"));
+      div.appendChild(btn);
+
+      document.body.appendChild(div);
+    } catch (e) {
+    }
+  }
+
+  function collectFillTargets() {
+    const candidates = U.buildCandidateList({ includeShadow: true });
+
+    const fillables = candidates
+      .filter(U.isFillableElement)
+      .filter(U.isVisible)
+      .filter((el) => !shouldNeverFillElement(el));
+
+    return fillables;
+  }
+
+  const FIELD_TYPES = [
+    "firstName",
+    "lastName",
+    "fullName",
+    "email",
+    "phone",
+    "addressLine",
+    "city",
+    "state",
+    "postalCode",
+    "country",
+    "linkedin",
+    "github",
+    "website",
+    "dateOfBirth",
+    "summary",
+    "coverLetter",
+    "graduationYear",
+    "experienceYears",
+    "salaryExpectation",
+  ];
+
+  function chooseBestMatch(el, enabledTypes) {
+    let best = { type: null, score: -999999, reasons: [] };
+    for (const t of enabledTypes) {
+      const r = U.scoreFieldType(el, t);
+      if (r.score > best.score)
+        best = { type: t, score: r.score, reasons: r.reasons };
+    }
+    return best;
+  }
+
+  function fillInputs(profile, opts = {}) {
+    const startedAt = Date.now();
+    const enabledTypes =
+      opts.enabledTypes && Array.isArray(opts.enabledTypes)
+        ? opts.enabledTypes
+        : FIELD_TYPES;
+
+    const report = {
+      frame: getFrameInfo(),
+      stats: { filled: 0, skipped: 0, matched: 0, errors: 0 },
+      items: [],
+      debug: { enabledTypes, dryRun: STATE.fillPolicy.dryRun },
+    };
+
+    try {
+      const targets = collectFillTargets();
+      const matches = [];
+
+      for (const el of targets) {
+        const best = chooseBestMatch(el, enabledTypes);
+        if (best.score < 35) continue;
+
+        matches.push({
+          el,
+          type: best.type,
+          score: best.score,
+          reasons: best.reasons,
+          top: U.withinTopForm(el),
+        });
+      }
+
+      matches.sort((a, b) => b.score - a.score || a.top - b.top);
+
+      const usedTypesCount = new Map();
+      const assigned = [];
+
+      for (const m of matches) {
+        const el = m.el;
+        const type = m.type;
+        let desired = (profile[type] || "").trim();
+
+        if (type === "coverLetter" && !desired) {
+          desired = (profile.summary || "").trim();
+        }
+
+        if (!desired) continue;
+
+        const count = usedTypesCount.get(type) || 0;
+
+        if (type === "fullName") {
+          const nm = (
+            (el.getAttribute("name") || "") +
+            " " +
+            (el.getAttribute("id") || "")
+          ).toLowerCase();
+          if (/(first|given)[-_ ]?name|fname|ad\b|isim\b/i.test(nm)) continue;
+          if (/(last|family|sur)[-_ ]?name|lname|soyad/i.test(nm)) continue;
+        }
+
+        assigned.push(m);
+
+        usedTypesCount.set(type, count + 1);
+      }
+
+      report.stats.matched = assigned.length;
+
+      const debugLines = [];
+
+      for (const m of assigned) {
+        const el = m.el;
+        const type = m.type;
+        const desired = (profile[type] || "").trim();
+
+        const current = (el.value || "").trim();
+
+        if (STATE.fillPolicy.skipIfNotEmpty && current) {
+          report.stats.skipped++;
+          report.items.push({
+            type,
+            score: m.score,
+            action: "skipped",
+            reason: "not-empty (skipIfNotEmpty)",
+            current,
+          });
           continue;
+        }
+
+        const lockDecision = enforceNameLockDecision(el, type, profile, report);
+        if (!lockDecision.allowed) {
+          report.stats.skipped++;
+          report.items.push({
+            type,
+            score: m.score,
+            action: "skipped",
+            reason: lockDecision.reason,
+            current,
+          });
+          continue;
+        }
+
+        if (STATE.fillPolicy.dryRun) {
+          report.items.push({
+            type,
+            score: m.score,
+            action: "dry-run",
+            reason: "dry-run enabled",
+            to: desired,
+          });
+          continue;
+        }
+
+        const res = U.setNativeValue(el, desired);
+        if (!res.ok) {
+          report.stats.errors++;
+          report.items.push({
+            type,
+            score: m.score,
+            action: "error",
+            reason: res.error || "setNativeValue failed",
+          });
+          continue;
+        }
+
+        report.stats.filled++;
+        report.items.push({
+          type,
+          score: m.score,
+          action: "filled",
+          from: res.from,
+          to: res.to,
+        });
+
+        if (
+          STATE.nameLock.enabled &&
+          STATE.nameLock.mode === "PROTECT" &&
+          isNameFieldType(type)
+        ) {
+          addLockedEntry(el, desired);
+        }
+
+        if (STATE.debug) {
+          debugLines.push(
+            `✅ ${type} (${Math.round(m.score)}) -> "${desired}"\n  reasons: ${m.reasons.slice(0, 3).join(", ")}`,
+          );
         }
       }
 
-      // 2. TELEFON
-      if (
-        type === "tel" ||
-        (type === "text" &&
-          match(meta, [
-            "phone",
-            "mobile",
-            "tel",
-            "cep",
-            "gsm",
-            "contact number",
-          ]))
-      ) {
-        if (setValue(el, p.phone)) filledCount++;
-        continue;
+      if (STATE.debug) {
+        makeOverlay(
+          `CV Asistan Debug (${report.frame.frame})\n` +
+            `Filled: ${report.stats.filled}, Skipped: ${report.stats.skipped}, Errors: ${report.stats.errors}\n\n` +
+            debugLines.slice(0, 12).join("\n\n"),
+        );
       }
 
-      // 3. LINKEDIN / URL
-      if (
-        type === "url" ||
-        (type === "text" &&
-          match(meta, ["linkedin", "website", "url", "link", "profil"]))
-      ) {
-        if (setValue(el, p.linkedin)) filledCount++;
-        continue;
-      }
-
-      // 4. MEZUNIYET TARİHİ (Graduation)
-      if (
-        match(meta, [
-          "graduation",
-          "mezuniyet",
-          "expected date",
-          "bitiş tarihi",
-          "mm/yyyy",
-        ])
-      ) {
-        if (setValue(el, p.gradDate)) filledCount++;
-        continue;
-      }
-
-      // 5. LOKASYON / ŞEHİR (Asla isim yazma)
-      if (
-        match(meta, [
-          "location",
-          "city",
-          "address",
-          "konum",
-          "şehir",
-          "country",
-          "ülke",
-        ])
-      ) {
-        if (setValue(el, p.location)) filledCount++;
-        continue;
-      }
-
-      // 6. ŞİRKET / COMPANY
-      if (
-        match(meta, [
-          "company",
-          "employer",
-          "şirket",
-          "firma",
-          "kurum",
-          "current company",
-        ])
-      ) {
-        if (setValue(el, p.company)) filledCount++;
-        continue;
-      }
-
-      // 7. ÖN YAZI / SUMMARY (Textarea)
-      if (
-        el.tagName === "TEXTAREA" ||
-        match(meta, [
-          "cover",
-          "letter",
-          "summary",
-          "about",
-          "hakkımda",
-          "ön yazı",
-          "mesaj",
-        ])
-      ) {
-        if (setValue(el, p.summary)) filledCount++;
-        continue;
-      }
-
-      // 8. İSİM / NAME (EN SON ve EN RİSKLİ)
-      // Diğer her şey elendikten sonra buraya gelir.
-      // EĞER input "konum", "şirket", "mail" vs. kelimeleri İÇERMİYORSA isim yaz.
-      const forbiddenForName = [
-        "email",
-        "mail",
-        "phone",
-        "tel",
-        "location",
-        "city",
-        "address",
-        "company",
-        "date",
-        "year",
-        "url",
-        "link",
-        "salary",
-        "maaş",
-      ];
-
-      if (
-        match(meta, ["name", "ad soyad", "isim", "full name", "adınız"]) &&
-        !match(meta, forbiddenForName)
-      ) {
-        if (setValue(el, p.fullName)) filledCount++;
-        continue;
-      }
+      log("Fill report:", report);
+    } catch (e) {
+      report.stats.errors++;
+      report.items.push({ action: "fatal", reason: String(e) });
+      error("fillInputs fatal:", e);
     }
 
-    return { filledCount, frame: window.top === window ? "top" : "iframe" };
+    report.timingMs = Date.now() - startedAt;
+    return report;
   }
 
-  // -------------------------
-  // Helpers
-  // -------------------------
-  function isFillable(el) {
-    if (el.type === "hidden" || el.disabled || el.readOnly) return false;
-    if (el.style.display === "none" || el.style.visibility === "hidden")
-      return false;
-    return true;
-  }
+  chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
+    (async () => {
+      try {
+        if (!request || !request.action) return;
 
-  // Inputun etrafındaki metinleri toplar (Label, Placeholder, Name, ID vb.)
-  function buildMeta(el) {
-    const parts = [
-      el.name,
-      el.id,
-      el.placeholder,
-      el.getAttribute("aria-label"),
-      el.getAttribute("data-testid"),
-    ];
+        if (request.action === "PING") {
+          sendResponse({ ok: true, ...getFrameInfo() });
+          return;
+        }
 
-    // Label bulma (for attribute ile)
-    if (el.id) {
-      const label = document.querySelector(`label[for="${el.id}"]`);
-      if (label) parts.push(label.innerText);
-    }
+        if (request.action === "TOGGLE_DEBUG") {
+          setDebug(!!request.debug);
+          sendResponse({ ok: true, debug: STATE.debug, ...getFrameInfo() });
+          return;
+        }
 
-    // Parent Label
-    const parentLabel = el.closest("label");
-    if (parentLabel) parts.push(parentLabel.innerText);
+        if (request.action === "FILL_FORM") {
+          const rawProfile = request.profile || {};
+          const settings = request.settings || {};
+          const opts = request.options || {};
 
-    // Yakındaki metinler (Previous element)
-    const prev = el.previousElementSibling;
-    if (
-      prev &&
-      (prev.tagName === "LABEL" ||
-        prev.tagName === "SPAN" ||
-        prev.tagName === "DIV" ||
-        prev.tagName === "B")
-    ) {
-      parts.push(prev.innerText);
-    }
+          applySettings(settings);
 
-    return parts.filter(Boolean).join(" ").toLowerCase();
-  }
+          const profile = U.normalizeProfile(rawProfile);
 
-  function match(text, keywords) {
-    if (!text) return false;
-    return keywords.some((k) => text.includes(k));
-  }
-
-  function setValue(el, value) {
-    if (!value) return false;
-
-    // Değeri yaz
-    el.value = value;
-
-    // React/Angular tetikleyicileri
-    el.dispatchEvent(new Event("input", { bubbles: true }));
-    el.dispatchEvent(new Event("change", { bubbles: true }));
-    el.dispatchEvent(new Event("blur", { bubbles: true }));
-
-    // Görsel geri bildirim (Sarı arka plan)
-    el.style.backgroundColor = "#fff9c4";
-    el.style.transition = "background-color 0.5s";
+          const report = fillInputs(profile, opts);
+          sendResponse({ ok: true, report });
+          return;
+        }
+      } catch (e) {
+        error("Content script error:", e);
+        sendResponse({ ok: false, error: String(e), ...getFrameInfo() });
+      }
+    })();
 
     return true;
-  }
-
-  // Güvenlik Kontrolleri
-  function normalizeEmail(v) {
-    return v && v.includes("@") ? v.trim() : "";
-  }
-  function normalizePhone(v) {
-    return v ? v.replace(/[^\d+]/g, "") : "";
-  } // Sadece rakam ve + bırak
-  function normalizeUrl(v) {
-    if (!v) return "";
-    return v.startsWith("http") ? v : "https://" + v;
-  }
-
-  function looksLikeOnlyName(value, name) {
-    if (!value || !name) return false;
-    return value.toLowerCase().trim() === name.toLowerCase().trim();
-  }
+  });
 })();
